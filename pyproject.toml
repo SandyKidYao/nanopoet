@@ -1,0 +1,14 @@
+[project]
+name = "nanopoet"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.1.2",
+    "notebook>=7.4.7",
+    "numpy>=2.3.4",
+    "pypinyin>=0.55.0",
+    "tokenizers>=0.22.1",
+    "torch>=2.9.0",
+]
