@@ -110,10 +110,12 @@ class GPTLanguageModel(nn.Module):
     def __init__(self, vocab_size, emb_size, block_size, layer_num, head_num, dropout):
         super().__init__()
         self.block_size = block_size
+        self.layer_num = layer_num
+        self.head_num = head_num
+        self.emb_size = emb_size
         self.token_embedding = nn.Embedding(vocab_size, emb_size)
         self.position_embedding = nn.Embedding(block_size, emb_size)
 
-        # ✅ 使用并行版本的 Transformer Block
         self.blocks = nn.Sequential(*[
             TransformerBlock(emb_size, head_num, block_size, dropout)
             for _ in range(layer_num)

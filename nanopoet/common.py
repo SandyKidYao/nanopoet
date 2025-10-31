@@ -52,10 +52,19 @@ SPECIAL_TOKENS = [
 def encode_poem(poem):
     return "".join([
         f"{BEGIN}",
-        f"{AUTHOR_START}{poem['author']}{AUTHOR_END}" if poem['author'] else "",
-        f"{STYLE_START}{poem['style']}{STYLE_END}" if poem['style'] else "",
-        f"{TITLE_START}{poem['title']}{TITLE_END}" if poem['title'] else "",
+        f"{AUTHOR_START}{poem['author']}{AUTHOR_END}" if poem.get('author') else "",
+        f"{STYLE_START}{poem['style']}{STYLE_END}" if poem.get('style') else "",
+        f"{TITLE_START}{poem['title']}{TITLE_END}" if poem.get('title') else "",
         f"{CONTENT_START}{poem['content']}{CONTENT_END}"
+    ])
+
+
+def encode_poem_prompt(author: str = None, style: str = None, title: str = None):
+    return "".join([
+        f"{BEGIN}",
+        f"{AUTHOR_START}{author}{AUTHOR_END}" if author else "",
+        f"{STYLE_START}{style}{STYLE_END}" if style else "",
+        f"{TITLE_START}{title}{TITLE_END}" if title else "",
     ])
 
 
