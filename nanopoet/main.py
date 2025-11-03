@@ -2,12 +2,13 @@ import torch
 from pathlib import Path
 
 from nanopoet.app import run_app
-from nanopoet.common import CharTokenizer, filter_poem, update_poem_author, AUTHOR_S, STYLE_T, STYLE_S
+from nanopoet.common import CharTokenizer, filter_poem, update_poem_author, AUTHOR_S, STYLE_T, STYLE_S, filter_by_author
 from nanopoet.dataset import load_raw_data, split_data, get_base_dir
 from nanopoet.model import GPTLanguageModel
 from nanopoet.train_mid import train_mid
 from nanopoet.train_pre import train_pre
 from nanopoet.train_sft import train_sft
+from nanopoet.train_reward import train_reward_classifier
 
 def pre(model, tokenizer, device, train, val, base_dir):
     print("\n" + "=" * 70)
@@ -81,6 +82,49 @@ def sft(model, tokenizer, device, train, val, base_dir):
         checkpoint_dir=f"{base_dir}/checkpoints/sft",
         output_path=f"{base_dir}/sft_model.pt",
         pretrain_model_path=f"{base_dir}/mid_train_model.pt",
+    )
+
+def reward(model, tokenizer, device, train, val, base_dir):
+    """
+    训练 Reward 分类器（作者风格匹配）
+
+    用于强化学习阶段的奖励信号，判断"作者-诗词"配对是否合理。
+
+    关键特性：
+    - 基于 SFT 模型，添加双向 Transformer 层
+    - 冻结 GPT 权重，只训练双向层和分类头（~1.6M 参数）
+    - 使用全局平均池化而非只取最后一个 token
+    - 充分利用数据：所有符合条件的诗词都作为正样本，并生成等量负样本
+    """
+    print("\n" + "=" * 70)
+    print("开始 Reward 分类器训练...")
+    print("=" * 70)
+
+    # 使用过滤后的数据（与 SFT 相同的作者和风格范围）
+    filtered_train_poems = [update_poem_author(p) for p in train if filter_by_author(p)]
+    filtered_val_poems = [update_poem_author(p) for p in val if filter_by_author(p)]
+    print(f"过滤后训练集大小: {len(filtered_train_poems)}")
+    print(f"过滤后验证集大小: {len(filtered_val_poems)}")
+
+    # 训练配置
+    batch_size = 16
+
+    # 训练作者风格匹配分类器
+    train_reward_classifier(
+        gpt_model=model,
+        tokenizer=tokenizer,
+        train_poems=filtered_train_poems,
+        val_poems=filtered_val_poems,
+        device=device,
+        batch_size=batch_size,
+        learning_rate=1e-4,  # 较小的学习率
+        total_epochs=10,
+        eval_interval=100,  # 每100步评估一次
+        eval_iters=10,
+        checkpoint_dir=f"{base_dir}/checkpoints/reward",
+        output_path=f"{base_dir}/reward_classifier.pt",
+        pretrain_model_path=f"{base_dir}/sft_model.pt",  # 基于 SFT 模型
+        num_bidirectional_layers=2,
     )
 
 def start_app(model, tokenizer, device, base_dir):
@@ -185,7 +229,11 @@ def main():
 
     # ========== SFT 监督微调阶段 ==========
     # 取消注释以运行 SFT 训练
-    sft(model, tokenizer, device, train, val, base_dir)
+    # sft(model, tokenizer, device, train, val, base_dir)
+
+    # ========== Reward 分类器训练阶段 ==========
+    # 取消注释以运行 Reward 分类器训练
+    reward(model, tokenizer, device, train, val, base_dir)
 
     # ========== 启动 Web 应用 ==========
     # start_app(model, tokenizer, device, base_dir)

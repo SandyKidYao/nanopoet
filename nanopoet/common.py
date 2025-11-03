@@ -15,6 +15,11 @@ def filter_poem(p: dict):
         return True
     return False
 
+def filter_by_author(p: dict):
+    if p["author"] in AUTHOR_S + AUTHOR_T:
+        return True
+    return False
+
 
 def update_poem_author(p: dict):
     """将诗词中的作者从繁体转换成简体"""
@@ -67,6 +72,39 @@ def encode_poem_prompt(author: str = None, style: str = None, title: str = None)
         f"{TITLE_START}{title}{TITLE_END}" if title else "",
     ])
 
+
+def decode_poem_str(encoded_str: str) -> dict:
+    """
+    从 encode_poem 生成的字符串中解码出原始的 dict 数据
+    """
+    poem = {}
+
+    # 移除开头的 BEGIN 标记
+    if encoded_str.startswith(BEGIN):
+        encoded_str = encoded_str[len(BEGIN):]
+
+    # 定义字段映射：(起始标记, 结束标记, 字段名)
+    fields = [
+        (AUTHOR_START, AUTHOR_END, 'author'),
+        (STYLE_START, STYLE_END, 'style'),
+        (TITLE_START, TITLE_END, 'title'),
+        (CONTENT_START, CONTENT_END, 'content'),
+    ]
+
+    # 逐个提取字段
+    for start_token, end_token, field_name in fields:
+        start_idx = encoded_str.find(start_token)
+        if start_idx != -1:
+            # 找到起始标记，查找对应的结束标记
+            end_idx = encoded_str.find(end_token, start_idx + len(start_token))
+            if end_idx != -1:
+                # 提取字段内容
+                content = encoded_str[start_idx + len(start_token):end_idx]
+                poem[field_name] = content
+                # 移除已处理的部分（可选，用于优化后续查找）
+                # encoded_str = encoded_str[:start_idx] + encoded_str[end_idx + len(end_token):]
+
+    return poem
 
 class CharTokenizer:
     """字符级别的分词器"""
