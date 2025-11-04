@@ -8,7 +8,9 @@ from nanopoet.model import GPTLanguageModel
 from nanopoet.train_mid import train_mid
 from nanopoet.train_pre import train_pre
 from nanopoet.train_sft import train_sft
-from nanopoet.train_reward import train_reward_classifier
+from nanopoet.train_reward import train_reward_classifier, BinaryClassifier
+from nanopoet.train_rl import train_rl
+from nanopoet.reward import extract_format
 
 def pre(model, tokenizer, device, train, val, base_dir):
     print("\n" + "=" * 70)
@@ -127,6 +129,86 @@ def reward(model, tokenizer, device, train, val, base_dir):
         num_bidirectional_layers=2,
     )
 
+def rl(model, tokenizer, device, train, val, base_dir):
+    """
+    RL 训练（强化学习后训练）
+
+    使用 REINFORCE 算法优化模型，基于三个奖励目标。
+
+    关键特性：
+    - 基于 SFT 模型进行强化学习训练
+    - 使用策略梯度算法（REINFORCE）
+    - 三个奖励目标：押韵（30%）、格式（30%）、作者风格（40%）
+    - 学习率线性衰减，支持 checkpoint 恢复
+    """
+    print("\n" + "=" * 70)
+    print("开始 RL 训练（强化学习）...")
+    print("=" * 70)
+
+    # 准备训练数据
+    filtered_data = [update_poem_author(p) for p in train + val if filter_by_author(p)]
+    format_data = extract_format(filtered_data)
+    train_authors = AUTHOR_S
+    train_styles = STYLE_T + STYLE_S
+
+    print(f"训练数据统计:")
+    print(f"  格式数量: {len(format_data)}")
+    print(f"  作者数量: {len(train_authors)}")
+    print(f"  风格数量: {len(train_styles)}")
+
+    # 加载 SFT 模型
+    sft_model_path = f"{base_dir}/sft_model.pt"
+    print(f"\n加载 SFT 模型: {sft_model_path}")
+    sft_state = torch.load(sft_model_path, map_location=device)
+    model.load_state_dict(sft_state, strict=True)
+    model.dropout = 0.0  # RL 训练不需要 dropout
+    print("✓ SFT 模型加载成功")
+
+    # 加载奖励分类器
+    classifier_path = f"{base_dir}/reward_classifier.pt"
+    print(f"\n加载奖励分类器: {classifier_path}")
+
+    reward_gpt = GPTLanguageModel(
+        vocab_size=tokenizer.vocab_size,
+        emb_size=model.emb_size,
+        block_size=model.block_size,
+        layer_num=model.layer_num,
+        head_num=model.head_num,
+        dropout=0.0,
+    ).to(device)
+
+    classifier = BinaryClassifier(
+        gpt_model=reward_gpt,
+        freeze_base=True,
+        num_bidirectional_layers=2
+    ).to(device)
+
+    classifier_checkpoint = torch.load(classifier_path, map_location=device)
+    classifier.load_state_dict(classifier_checkpoint['classifier_state_dict'])
+    classifier.eval()
+    print("✓ 奖励分类器加载成功")
+
+    # 开始 RL 训练
+    train_rl(
+        model=model,
+        classifier=classifier,
+        tokenizer=tokenizer,
+        format_data=format_data,
+        train_authors=train_authors,
+        train_styles=train_styles,
+        device=device,
+        num_samples_per_prompt=8,    # 每个提示采样 8 个样本
+        num_steps=1000,               # 训练 1000 步
+        learning_rate=1e-5,           # 较小的学习率
+        temperature=1.0,              # 采样温度
+        top_k=50,                     # Top-K 采样
+        max_new_tokens=100,           # 最大生成 token 数
+        eval_interval=10,             # 每 10 步输出一次
+        save_interval=100,            # 每 100 步保存一次
+        checkpoint_dir=f"{base_dir}/checkpoints/rl",
+        output_path=f"{base_dir}/rl_model.pt",
+    )
+
 def start_app(model, tokenizer, device, base_dir):
     print("\n" + "=" * 70)
     print("准备启动 Web 应用...")
@@ -134,6 +216,7 @@ def start_app(model, tokenizer, device, base_dir):
 
     # 检查哪些模型文件存在，并加载它们
     potential_models = [
+        {"name": "RL 模型", "path": f"{base_dir}/rl_model.pt"},
         {"name": "SFT 模型", "path": f"{base_dir}/sft_model.pt"},
         {"name": "Mid Train 模型", "path": f"{base_dir}/mid_train_model.pt"},
         {"name": "Pre Train 模型", "path": f"{base_dir}/pre_train_model.pt"},
@@ -147,7 +230,16 @@ def start_app(model, tokenizer, device, base_dir):
             print(f"  路径: {model_path}")
 
             # 加载模型
-            state_dict = torch.load(model_path, map_location=device)
+            checkpoint = torch.load(model_path, map_location=device)
+
+            # 处理不同的保存格式
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                # RL 模型格式
+                state_dict = checkpoint['model_state_dict']
+            else:
+                # 其他模型格式（直接保存的 state_dict）
+                state_dict = checkpoint
+
             loaded_model = GPTLanguageModel(
                 vocab_size=tokenizer.vocab_size,
                 emb_size=model.emb_size,
@@ -233,10 +325,14 @@ def main():
 
     # ========== Reward 分类器训练阶段 ==========
     # 取消注释以运行 Reward 分类器训练
-    reward(model, tokenizer, device, train, val, base_dir)
+    # reward(model, tokenizer, device, train, val, base_dir)
+
+    # ========== RL 强化学习训练阶段 ==========
+    # 取消注释以运行 RL 训练
+    # rl(model, tokenizer, device, train, val, base_dir)
 
     # ========== 启动 Web 应用 ==========
-    # start_app(model, tokenizer, device, base_dir)
+    start_app(model, tokenizer, device, base_dir)
 
 
 if __name__ == '__main__':
